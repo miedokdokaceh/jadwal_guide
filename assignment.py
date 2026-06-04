@@ -9,7 +9,7 @@ import streamlit as st
 
 
 # =========================================================
-# AUTH — Service Account
+# AUTH
 # =========================================================
 
 def get_gspread_client():
@@ -17,18 +17,14 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-
     try:
         creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=scope,
+            st.secrets["gcp_service_account"], scopes=scope
         )
     except Exception:
         creds = Credentials.from_service_account_file(
-            "service_account.json",
-            scopes=scope,
+            "service_account.json", scopes=scope
         )
-
     return gspread.authorize(creds)
 
 
@@ -37,85 +33,85 @@ def get_gspread_client():
 # =========================================================
 
 def extract_date(text):
-    """Ekstrak tanggal dari format: '1 Senin Juni 2026, PAKUALAMAN (15:30)'"""
+    """'1 Senin Juni 2026, ...' -> datetime"""
     match = re.search(r"(\d{1,2})\s(\w+)\s(\w+)\s(\d{4})", str(text))
     if match:
-        day_num = match.group(1)
+        day_num    = match.group(1)
         indo_month = match.group(3)
-        year = match.group(4)
-        month_map = {
+        year       = match.group(4)
+        month_map  = {
             "Januari": "January", "Februari": "February", "Maret": "March",
             "April": "April", "Mei": "May", "Juni": "June",
             "Juli": "July", "Agustus": "August", "September": "September",
             "Oktober": "October", "November": "November", "Desember": "December",
         }
-        translated_month = month_map.get(indo_month, indo_month)
-        date_str = f"{day_num} {translated_month} {year}"
-        return datetime.strptime(date_str, "%d %B %Y")
+        translated = month_map.get(indo_month, indo_month)
+        return datetime.strptime(f"{day_num} {translated} {year}", "%d %B %Y")
     return None
 
 
 def extract_tanggal_num(text):
-    """Ekstrak angka tanggal (1–31) dari TANGGAL & RUTE."""
+    """'1 Senin Juni 2026, ...' -> 1"""
     match = re.match(r"(\d{1,2})\s", str(text).strip())
-    if match:
-        return int(match.group(1))
-    return None
+    return int(match.group(1)) if match else None
 
 
 def extract_shift(text):
     """
-    Tentukan shift berdasarkan jam di TANGGAL & RUTE.
-    Format jam: (HH:MM)
-    - Pagi  : 00:00 – 11:59
-    - Sore  : 12:00 – 17:59
-    - Malam : 18:00 – 23:59
+    Baca jam dari '(HH:MM)' lalu tentukan shift:
+      P (Pagi)  : 00:00 - 11:59
+      S (Sore)  : 12:00 - 17:59
+      M (Malam) : 18:00 - 23:59
     """
     match = re.search(r"\((\d{1,2}):(\d{2})\)", str(text))
     if match:
         hour = int(match.group(1))
         if hour < 12:
-            return "P"   # Pagi
+            return "P"
         elif hour < 18:
-            return "S"   # Sore
+            return "S"
         else:
-            return "M"   # Malam
+            return "M"
     return None
 
 
-# Kode unavailability yang mencakup masing-masing shift
+# Kode unavailability di sheet -> shift yang terpengaruh
 UNAVAILABILITY_COVERS = {
-    "P":  {"P", "TS", "PM", "PS"},   # Pagi
-    "S":  {"S", "TS", "SM", "PS"},   # Sore
-    "M":  {"M", "TS", "PM", "SM"},   # Malam
+    "P":  {"P", "TS", "PM", "PS"},
+    "S":  {"S", "TS", "SM", "PS"},
+    "M":  {"M", "TS", "PM", "SM"},
 }
 
 
-def is_guide_unavailable(unavail_code, shift_code):
-    """
-    Cek apakah kode unavailability dari sheet mencakup shift tertentu.
-    unavail_code : nilai sel di sheet, misal 'TS', 'P', 'SM', dll.
-    shift_code   : 'P', 'S', atau 'M'
-    """
+def is_unavailable(unavail_code, shift_code):
     if not unavail_code or pd.isna(unavail_code):
         return False
     code = str(unavail_code).strip().upper()
-    if not code:
-        return False
-    covers = UNAVAILABILITY_COVERS.get(shift_code, set())
-    return code in covers
+    return code in UNAVAILABILITY_COVERS.get(shift_code, set())
 
 
-def build_unavailability_dict(unavailability_gs):
+def build_unavailability_dict(csv_url):
     """
-    Bangun dict: { guide_name: { tanggal_int: unavail_code } }
-    dari DataFrame unavailability sheet (header=16, row 17 = header kolom).
-    Kolom: No. | Guide | 1 | 2 | 3 | ... | 31
+    Baca sheet unavailability, cari baris header 'Guide' secara dinamis,
+    return dict: { nama_guide: { tanggal_int: kode } }
     """
-    df = unavailability_gs.copy()
+    raw = pd.read_csv(csv_url, header=None)
+
+    header_row = None
+    for i, row in raw.iterrows():
+        if row.astype(str).str.strip().str.lower().eq("guide").any():
+            header_row = i
+            break
+
+    if header_row is None:
+        raise ValueError(
+            "Kolom 'Guide' tidak ditemukan di sheet CHECK UNAVAILABILITY MONTHLY."
+        )
+
+    df = pd.read_csv(csv_url, header=header_row)
     df = df.rename(columns={"Guide": "Name"})
 
-    # Kolom tanggal: kolom yang namanya bisa dikonversi ke integer
+    # Kolom tanggal = kolom yang namanya berupa angka bulat
     date_cols = []
     for col in df.columns:
         try:
@@ -135,6 +131,7 @@ def build_unavailability_dict(unavailability_gs):
             if pd.notna(val) and str(val).strip():
                 unavail_by_date[int(col)] = str(val).strip().upper()
         result[name] = unavail_by_date
+
     return result
 
 
@@ -147,18 +144,18 @@ def run_assignment():
     GS_UNAVAILABILITY_ID = "1jS8KUIYfCHAHafgibzr74GwCEBQvaObHSgoCqRiyGCA"
 
     # ---- Load Dashboard ----
-    csv_url = (
+    csv_url_dashboard = (
         f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
         f"/gviz/tq?tqx=out:csv&sheet=DASHBOARD"
     )
-    dashboard = pd.read_csv(csv_url, header=1)
+    dashboard = pd.read_csv(csv_url_dashboard, header=1)
     dashboard = dashboard[dashboard["SUDAH DIKIRIM"].notna()].copy()
     dashboard = dashboard[
         dashboard["SUDAH DIKIRIM"].astype(str).str.strip() != ""
     ]
-    dashboard["DATE"]         = dashboard["TANGGAL & RUTE"].apply(extract_date)
-    dashboard["TANGGAL_NUM"]  = dashboard["TANGGAL & RUTE"].apply(extract_tanggal_num)
-    dashboard["SHIFT"]        = dashboard["TANGGAL & RUTE"].apply(extract_shift)
+    dashboard["DATE"]        = dashboard["TANGGAL & RUTE"].apply(extract_date)
+    dashboard["TANGGAL_NUM"] = dashboard["TANGGAL & RUTE"].apply(extract_tanggal_num)
+    dashboard["SHIFT"]       = dashboard["TANGGAL & RUTE"].apply(extract_shift)
     dashboard = dashboard[dashboard["DATE"].notna()].copy()
     dashboard["WEEK"] = dashboard["DATE"].dt.isocalendar().week
     dashboard = dashboard.sort_values(by="DATE", ascending=True).reset_index(drop=True)
@@ -169,20 +166,7 @@ def run_assignment():
         f"https://docs.google.com/spreadsheets/d/{GS_UNAVAILABILITY_ID}"
         f"/gviz/tq?tqx=out:csv&sheet={encoded_sheet}"
     )
-    # Baca tanpa header dulu, cari baris yang mengandung kolom 'Guide'
-    raw_unavail = pd.read_csv(csv_url_unavailability, header=None)
-    header_row = None
-    for i, row in raw_unavail.iterrows():
-        if row.astype(str).str.strip().str.lower().eq("guide").any():
-            header_row = i
-            break
-    if header_row is None:
-        raise ValueError(
-            "Kolom 'Guide' tidak ditemukan di sheet CHECK UNAVAILABILITY MONTHLY. "
-            "Pastikan sheet dapat diakses dan formatnya benar."
-        )
-    unavailability_gs = pd.read_csv(csv_url_unavailability, header=header_row)
-    unavail_dict = build_unavailability_dict(unavailability_gs)
+    unavail_dict = build_unavailability_dict(csv_url_unavailability)
 
     # ---- Guide Dictionary ----
     guide_dict = {
@@ -190,69 +174,61 @@ def run_assignment():
         for name in unavail_dict
     }
 
-    # ---- Assignment Process ----
-    all_assignment_results = []
+    # ---- Assignment per Minggu ----
+    all_results = []
     weeks = sorted(dashboard["WEEK"].dropna().unique())
 
     for current_week in weeks:
-        dashboard_week = dashboard[dashboard["WEEK"] == current_week].copy()
-        dashboard_week = dashboard_week.sort_values(
-            by="DATE", ascending=True
-        ).reset_index(drop=True)
+        week_df = dashboard[dashboard["WEEK"] == current_week].copy()
+        week_df = week_df.sort_values(by="DATE", ascending=True).reset_index(drop=True)
 
-        # Reset hitungan per minggu
         for guide in guide_dict:
             guide_dict[guide]["assigned_count"] = 0
 
-        assignment_output = []
+        output = []
 
-        for _, row in dashboard_week.iterrows():
-            jadwal      = row["TANGGAL & RUTE"]
-            tgl_num     = row["TANGGAL_NUM"]   # int, misal 1
-            shift_code  = row["SHIFT"]         # 'P', 'S', atau 'M'
+        for _, row in week_df.iterrows():
+            jadwal     = row["TANGGAL & RUTE"]
+            tgl_num    = row["TANGGAL_NUM"]
+            shift_code = row["SHIFT"]
 
-            feasible_guides = []
-
+            feasible = []
             for guide, info in guide_dict.items():
-                guide_unavail = unavail_dict.get(guide, {})
-                unavail_code  = guide_unavail.get(tgl_num, "")  # '' = kosong = available
-
-                if not is_guide_unavailable(unavail_code, shift_code):
-                    feasible_guides.append({
+                kode = unavail_dict.get(guide, {}).get(tgl_num, "")
+                if not is_unavailable(kode, shift_code):
+                    feasible.append({
                         "guide": guide,
                         "k": info["assigned_count"],
                     })
 
-            if len(feasible_guides) == 0:
-                assignment_output.append({
+            if not feasible:
+                output.append({
                     "WEEK":             str(current_week),
                     "JADWAL":           jadwal,
-                    "GUIDE_DITUGASKAN": "TIDAK ADA GUIDE",
                     "SHIFT":            shift_code,
+                    "GUIDE_DITUGASKAN": "TIDAK ADA GUIDE",
                     "k_i":              "",
                     "TOTAL_DITUGASKAN": "0",
                 })
                 continue
 
-            # Pilih guide dengan jumlah penugasan paling sedikit (round-robin)
-            chosen = min(feasible_guides, key=lambda x: x["k"])
+            # Round-robin: pilih guide dengan penugasan paling sedikit
+            chosen = min(feasible, key=lambda x: x["k"])
             guide_dict[chosen["guide"]]["assigned_count"] += 1
-            total_ditugaskan = str(guide_dict[chosen["guide"]]["assigned_count"])
 
-            assignment_output.append({
+            output.append({
                 "WEEK":             str(current_week),
                 "JADWAL":           jadwal,
-                "GUIDE_DITUGASKAN": chosen["guide"],
                 "SHIFT":            shift_code,
+                "GUIDE_DITUGASKAN": chosen["guide"],
                 "k_i":              chosen["k"],
-                "TOTAL_DITUGASKAN": total_ditugaskan,
+                "TOTAL_DITUGASKAN": str(guide_dict[chosen["guide"]]["assigned_count"]),
             })
 
-        assignment_df_week = pd.DataFrame(assignment_output)
-        all_assignment_results.append(assignment_df_week)
+        all_results.append(pd.DataFrame(output))
 
     # ---- Gabung & Sort ----
-    assignment_df = pd.concat(all_assignment_results, ignore_index=True)
+    assignment_df = pd.concat(all_results, ignore_index=True)
     assignment_df = assignment_df.merge(
         dashboard[["TANGGAL & RUTE", "DATE"]],
         left_on="JADWAL",
@@ -273,17 +249,12 @@ def run_assignment():
 
 def export_to_sheets(assignment_df):
     gc = get_gspread_client()
-    SPREADSHEET_ID_EXPORT = "1oYpIm7qRNS69oWxgWPVPx1eOywvOsanr2VLaH7_pnSY"
-    sheet_name_export     = "Penugasan"
-
-    spreadsheet = gc.open_by_key(SPREADSHEET_ID_EXPORT)
+    spreadsheet = gc.open_by_key("1oYpIm7qRNS69oWxgWPVPx1eOywvOsanr2VLaH7_pnSY")
 
     try:
-        worksheet = spreadsheet.worksheet(sheet_name_export)
+        worksheet = spreadsheet.worksheet("Penugasan")
     except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(
-            title=sheet_name_export, rows=5000, cols=20
-        )
+        worksheet = spreadsheet.add_worksheet(title="Penugasan", rows=5000, cols=20)
 
     worksheet.clear()
     set_with_dataframe(
