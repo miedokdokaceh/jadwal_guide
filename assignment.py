@@ -169,7 +169,19 @@ def run_assignment():
         f"https://docs.google.com/spreadsheets/d/{GS_UNAVAILABILITY_ID}"
         f"/gviz/tq?tqx=out:csv&sheet={encoded_sheet}"
     )
-    unavailability_gs = pd.read_csv(csv_url_unavailability, header=16)
+    # Baca tanpa header dulu, cari baris yang mengandung kolom 'Guide'
+    raw_unavail = pd.read_csv(csv_url_unavailability, header=None)
+    header_row = None
+    for i, row in raw_unavail.iterrows():
+        if row.astype(str).str.strip().str.lower().eq("guide").any():
+            header_row = i
+            break
+    if header_row is None:
+        raise ValueError(
+            "Kolom 'Guide' tidak ditemukan di sheet CHECK UNAVAILABILITY MONTHLY. "
+            "Pastikan sheet dapat diakses dan formatnya benar."
+        )
+    unavailability_gs = pd.read_csv(csv_url_unavailability, header=header_row)
     unavail_dict = build_unavailability_dict(unavailability_gs)
 
     # ---- Guide Dictionary ----
