@@ -14,14 +14,12 @@ st.caption("Sistem penugasan guide otomatis dari Google Sheets")
 st.divider()
 
 col1, col2 = st.columns([2, 1])
-
 with col1:
     st.subheader("Generate Penugasan")
     st.write(
         "Klik tombol di bawah untuk memproses data dari Google Sheets "
         "dan menghasilkan penugasan guide secara otomatis."
     )
-
 with col2:
     st.subheader("Status")
     status_box = st.empty()
@@ -29,8 +27,8 @@ with col2:
 
 st.divider()
 
+# ---- Generate ----
 if st.button("▶ Generate Assignment", type="primary", use_container_width=True):
-
     with st.spinner("Memuat data dari Google Sheets..."):
         try:
             assignment_df = run_assignment()
@@ -41,18 +39,22 @@ if st.button("▶ Generate Assignment", type="primary", use_container_width=True
             st.exception(e)
             st.stop()
 
+# ---- Tampilkan hasil jika sudah ada di session ----
+if "assignment_df" in st.session_state:
+    assignment_df = st.session_state["assignment_df"]
+
     st.success(f"✅ Berhasil memproses **{len(assignment_df)}** jadwal.")
 
-    # ---- Tabel hasil ----
+    # Tabel hasil
     st.subheader("Hasil Penugasan")
     st.dataframe(assignment_df, use_container_width=True)
 
-    # ---- Statistik ringkas ----
+    # Statistik
     st.subheader("Statistik")
     total_jadwal = len(assignment_df)
-    tidak_ada = (assignment_df["GUIDE_DITUGASKAN"] == "TIDAK ADA GUIDE").sum()
-    berhasil = total_jadwal - tidak_ada
-    guide_unik = assignment_df[
+    tidak_ada    = (assignment_df["GUIDE_DITUGASKAN"] == "TIDAK ADA GUIDE").sum()
+    berhasil     = total_jadwal - tidak_ada
+    guide_unik   = assignment_df[
         assignment_df["GUIDE_DITUGASKAN"] != "TIDAK ADA GUIDE"
     ]["GUIDE_DITUGASKAN"].nunique()
 
@@ -61,12 +63,11 @@ if st.button("▶ Generate Assignment", type="primary", use_container_width=True
     c2.metric("Berhasil Ditugaskan", berhasil)
     c3.metric("Guide Terlibat", guide_unik)
 
-    # ---- Visualisasi distribusi ----
+    # Visualisasi
     st.subheader("Distribusi Penugasan Guide")
     guide_stats = (
-        assignment_df[
-            assignment_df["GUIDE_DITUGASKAN"] != "TIDAK ADA GUIDE"
-        ]["GUIDE_DITUGASKAN"]
+        assignment_df[assignment_df["GUIDE_DITUGASKAN"] != "TIDAK ADA GUIDE"]
+        ["GUIDE_DITUGASKAN"]
         .value_counts()
     )
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -80,18 +81,13 @@ if st.button("▶ Generate Assignment", type="primary", use_container_width=True
 
     st.divider()
 
-    # ---- Export ke Sheets ----
+    # ---- Export — selalu pakai data dari session_state ----
     st.subheader("Export ke Google Sheets")
     if st.button("📤 Tulis ke Sheet 'Penugasan'", use_container_width=True):
         with st.spinner("Menulis ke Google Sheets..."):
             try:
-                export_to_sheets(assignment_df)
+                export_to_sheets(st.session_state["assignment_df"])
                 st.success("✅ Data berhasil ditulis ke Google Sheets!")
             except Exception as e:
                 st.error(f"❌ Gagal export: {e}")
                 st.exception(e)
-
-# Kalau sudah ada hasil di session, tampilkan ulang tanpa generate ulang
-elif "assignment_df" in st.session_state:
-    st.info("Data assignment terakhir masih tersimpan. Generate ulang untuk refresh.")
-    st.dataframe(st.session_state["assignment_df"], use_container_width=True)
