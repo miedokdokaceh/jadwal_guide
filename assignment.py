@@ -212,19 +212,41 @@ def run_assignment():
                 })
                 continue
 
-            # Round-robin: pilih guide dengan penugasan paling sedikit
-            chosen = min(feasible, key=lambda x: x["k"])
-            guide_dict[chosen["guide"]]["assigned_count"] += 1
+           # Hitung bobot w_i = 1/(k_i+1)
 
+            for item in feasible:
+                item["w"] = 1 / (item["k"] + 1)
+            
+            feasible_df = pd.DataFrame(feasible)
+            
+            total_weight = feasible_df["w"].sum()
+            
+            feasible_df["prob"] = (
+                feasible_df["w"] / total_weight
+            )
+            
+            chosen = feasible_df.sample(
+                n=1,
+                weights="prob",
+                replace=False
+            ).iloc[0]
+            
+            chosen_guide = chosen["guide"]
+            
+            guide_dict[chosen_guide]["assigned_count"] += 1
+            
             output.append({
-                "WEEK":             str(current_week),
-                "JADWAL":           jadwal,
-                "SHIFT":            shift_code,
-                "GUIDE_DITUGASKAN": chosen["guide"],
-                "k_i":              chosen["k"],
-                "TOTAL_DITUGASKAN": str(guide_dict[chosen["guide"]]["assigned_count"]),
+                "WEEK": str(current_week),
+                "JADWAL": jadwal,
+                "SHIFT": shift_code,
+                "GUIDE_DITUGASKAN": chosen_guide,
+                "k_i": chosen["k"],
+                "w_i": round(chosen["w"], 4),
+                "PROBABILITAS": round(chosen["prob"], 4),
+                "TOTAL_DITUGASKAN": str(
+                    guide_dict[chosen_guide]["assigned_count"]
+                ),
             })
-
         all_results.append(pd.DataFrame(output))
 
     # ---- Gabung & Sort ----
